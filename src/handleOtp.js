@@ -36,7 +36,6 @@ async function decryptOtp(clientId, encryptedData) {
 }
 
 exports.handler = async function (event, context) {
-    console.log(event);
     if (event.path === '/generateOtp') {
         const otp = await encryptOtp(event.queryStringParameters.clientId, uuidv4()); // encrypt otp using KMS
         const timestamp = Math.floor(Date.now() / 1000); // current timestamp in seconds
@@ -91,7 +90,7 @@ exports.handler = async function (event, context) {
             body: JSON.stringify({
                 message: 'OTP validated',
                 ttl: response.Item.ttl.N,
-                otp: await decryptOtp(event.queryStringParameters.clientId, Buffer.from(response.Item.otp.S, 'base64')),
+                otp: Buffer.from(result.plaintext).toString('ascii'),
             })
         };
     }
