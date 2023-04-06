@@ -1,0 +1,20 @@
+{
+  "name": "src",
+  "version": "1.0.0",
+  "description": "OTP generator and validator",
+  "main": "handleOtp.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "OTP",
+    "TOTP",
+    "AWS"
+  ],
+  "author": "Paulo Aragao",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.306.0",
+    "uuid": "^9.0.0"
+  }
+}
