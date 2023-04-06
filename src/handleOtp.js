@@ -1,6 +1,7 @@
 const { DynamoDBClient, PutItemCommand, GetItemCommand, DeleteItemCommand } = require("@aws-sdk/client-dynamodb");
+const AWSXray = require("aws-xray-sdk");
 const { v4: uuidv4 } = require("uuid");
-const ddb = new DynamoDBClient({});
+const ddb = AWSXray.captureAWSv3Client(new DynamoDBClient({}));
 
 exports.handler = async function (event, context) {
     console.log(event);
@@ -49,11 +50,12 @@ exports.handler = async function (event, context) {
             ],
         };
 
-        await ddb.send(new GetItemCommand(params));
+        const response = await ddb.send(new GetItemCommand(params));
         return {
             statusCode: 200,
             body: JSON.stringify({
-                message: 'OTP validated'
+                message: 'OTP validated',
+                otp: response,
             })
         };
     }
