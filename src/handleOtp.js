@@ -9,11 +9,11 @@ const generatorKeyId = process.env.KMS_KEY_ID;
 const keyIds = [process.env.KMS_KEY_ARN];
 const keyring = new KmsKeyringNode({ generatorKeyId, keyIds });
 
-async function encryptOtp(clientId, otp) {    
+async function encryptOtp(sub, deviceId, otp) {    
     const context = { 
         stage: 'application',
-        purpose: 'avoid man in the middle attacks',
-        origin: clientId
+        origin: sub,
+        deviceId: deviceId
     }
     const { result } = await encrypt(keyring, otp, {
         encryptionContext: context,
@@ -21,11 +21,11 @@ async function encryptOtp(clientId, otp) {
     return result;
 }
 
-async function decryptOtp(clientId, encryptedData) {
+async function decryptOtp(sub, encryptedData) {
     const { plaintext, messageHeader } = await decrypt(keyring, encryptedData);
     const { encryptionContext } = messageHeader;
     const status = 'SUCCESS';
-    if (encryptionContext.origin !== clientId) {
+    if (encryptionContext.origin !== sub) {
         status = 'ERROR';
     }
     return { 
@@ -36,19 +36,23 @@ async function decryptOtp(clientId, encryptedData) {
 }
 
 exports.handler = async function (event, context) {
+    // requires sub from Cognito and a deviceId from an user endpoint device
     if (event.path === '/generateOtp') {
-        const otp = await encryptOtp(event.queryStringParameters.clientId, uuidv4()); // encrypt otp using KMS
+        const otp = await encryptOtp(event.queryStringParameters.sub, event.queryStringParameters.deviceId, uuidv4()); // encrypt otp using KMS
         const timestamp = Math.floor(Date.now() / 1000); // current timestamp in seconds
-        const ttl = timestamp + 60; // 1 minute TTL
+        const ttl = timestamp + process.env.TTL_DURATION; // 1 minute TTL
         const createdAt = timestamp.toString();
         const params = {
             TableName: process.env.OTP_TABLE_NAME,
             Item: {
                 "clientId": { 
-                    S: event.queryStringParameters.clientId
+                    S: event.queryStringParameters.sub
                 },
                 "createdAt": { 
                     S: createdAt
+                },
+                "deviceId": { 
+                    S: event.queryStringParameters.deviceId
                 },
                 "otp": { 
                     S: Buffer.from(otp).toString('base64') //base64 encoded to make it easier to store in DynamoDB
@@ -70,27 +74,61 @@ exports.handler = async function (event, context) {
         };
     }
 
+    // requires sub, createdAt and deviceId from the generateOtp endpoint
     if (event.path === '/validateOtp') {
         const params = {
             TableName: process.env.OTP_TABLE_NAME,
             "Key": {
                 "clientId": { 
-                    "S": event.queryStringParameters.clientId
+                    "S": event.queryStringParameters.sub
                 },
                 "createdAt": {  
+                    "S": event.queryStringParameters.createdAt
+                },
+            },
+        };
+        const response = await ddb.send(new GetItemCommand(params));
+        if (response.Item.deviceId.S === event.queryStringParameters.deviceId) {
+            const result = await decryptOtp(event.queryStringParameters.sub, Buffer.from(response.Item.otp.S, 'base64'));
+            return {
+                statusCode: 200,
+                body: JSON.stringify({
+                    message: 'OTP validated',
+                    ttl: response.Item.ttl.N,
+                    otp: Buffer.from(result.plaintext).toString('ascii'),
+                })
+            };
+        } else {
+            return {
+                statusCode: 200,
+                body: JSON.stringify({
+                    message: 'OTP validation failed',
+                    ttl: response.Item.ttl.N,
+                    otp: await decryptOtp(event.queryStringParameters.sub, Buffer.from(response.Item.otp.S, 'base64')),
+                    deviceIdFound: response.Item.deviceId.S,
+                })
+            };
+        };
+    }
+
+    // requires sub, createdAt and deviceId from the generateOtp endpoint
+    if (event.path === '/invalidateOtp') {
+        const params = {
+            TableName: process.env.OTP_TABLE_NAME,
+            "Key": {
+                "clientId": { 
+                    "S": event.queryStringParameters.sub
+                },
+                "createdAt": {
                     "S": event.queryStringParameters.createdAt
                 }
             },
         };
-        const response = await ddb.send(new GetItemCommand(params));
-        const result = await decryptOtp(event.queryStringParameters.clientId, Buffer.from(response.Item.otp.S, 'base64'));
-        console.log(result);
+        await ddb.send(new DeleteItemCommand(params));
         return {
             statusCode: 200,
             body: JSON.stringify({
-                message: 'OTP validated',
-                ttl: response.Item.ttl.N,
-                otp: Buffer.from(result.plaintext).toString('ascii'),
+                message: 'OTP deleted',
             })
         };
     }
