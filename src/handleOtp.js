@@ -131,7 +131,7 @@ exports.handler = async function (event, context) {
                 message: 'OTP deleted',
             })
         };
-    }
+    }    
 
     return {
         statusCode: 200,
